@@ -1,0 +1,123 @@
+﻿using Blazor.FunitureStore.Repositories;
+using BlazorFunitureStore.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Transactions;
+
+namespace BlazorFunitureStore.Server.Controllers
+{
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class OrderController : ControllerBase
+    {
+        private readonly IOrderRepository _orderRespository;
+        private readonly IOrderProductRepository _orderProductRepository;
+
+        public OrderController(IOrderRepository orderRepository, IOrderProductRepository orderProductRepository)
+        {
+            _orderRespository = orderRepository;
+            _orderProductRepository = orderProductRepository;
+        }
+        [HttpPost]
+        public async Task<IActionResult> Post([FromBody] Order order)
+        {
+            if (order == null)
+                return BadRequest();
+            if (order.OrderNumber == 0)
+                ModelState.AddModelError("OrderNumber", "order number can´t be empty");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            using (TransactionScope scope = new TransactionScope(TransactionScopeAsyncFlowOption.Enabled))
+            {
+                order.Id = await _orderRespository.GetNextId();
+                await _orderRespository.InsertOrder(order);
+
+                if (order.Products != null && order.Products.Any())
+                {
+                    foreach (var prd in order.Products)
+                    {
+                        await _orderProductRepository.InsertOrderProduct(order.Id, prd);
+                    }
+                }
+                scope.Complete();
+            }
+            return NoContent();
+        }
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Put(int id,[FromBody] Order order)
+        {
+            if (order == null)
+                return BadRequest();
+            if (order.OrderNumber == 0)
+                ModelState.AddModelError("OrderNumber", "order number can´t be empty");
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            using (TransactionScope scope = new TransactionScope(TransactionScopeAsyncFlowOption.Enabled))
+            {
+                
+                await _orderRespository.UpdateOrder(order);
+                await _orderProductRepository.DeleteOrderProductByOrder(order.Id);
+
+                if (order.Products != null && order.Products.Any())
+                {
+                    foreach (var prd in order.Products)
+                    {
+                        await _orderProductRepository.InsertOrderProduct(order.Id, prd);
+                    }
+                }
+                scope.Complete();
+            }
+            return NoContent();
+        }
+
+
+
+
+
+
+        [HttpGet("GetNextNumber")]
+        public async Task<int> GetNextNumber()
+        {
+            return await _orderRespository.GetNextNumber();
+        }
+        [HttpGet]
+        public async Task<IEnumerable<Order>> Get()
+        {
+            var order = await _orderRespository.GetAll();
+
+            foreach (var item in order)
+            {
+                item.Products = (List<Product>) await _orderProductRepository.GetByOrder(item.Id);
+            }
+            return order;
+        }
+
+        [HttpGet("{id}")]
+        public async Task<Order> GetDetails(int id)
+        {
+            var order = await _orderRespository.GetDetails(id);
+
+            var products = await _orderProductRepository.GetByOrder(id);
+
+            if (order != null)
+                order.Products = products.ToList();
+
+            return order;
+        }
+        [HttpDelete("{id}")]
+        public async Task Delete(int id)
+        { 
+            await _orderRespository.DeleteOrder(id);
+        }
+
+
+    }
+}
